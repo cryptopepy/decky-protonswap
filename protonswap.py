@@ -96,7 +96,7 @@ def _cachyos_list_versions(api_url: str) -> list:
     hwcaps = get_hwcaps()
     prefix = "proton-cachyos-"
     versions = []
-    releases = _github_get_json(f"{api_url}?per_page=100&page=1")
+    releases = _api_get_json(f"{api_url}?per_page=100&page=1")
     for release in releases:
         for asset in release.get("assets", []):
             name = asset.get("name", "")
@@ -120,15 +120,27 @@ def _cachyos_list_versions(api_url: str) -> list:
 # Repository registry, mirroring ProtonUp-Qt ctmods. One entry per repo:
 #   id             - stable identifier used by the frontend
 #   name           - display name
-#   api_url        - GitHub releases API URL
+#   api_url        - releases API URL (GitHub or Codeberg)
+#   api_type       - "github" (default) or "codeberg" (different listing param)
 #   release_format - archive extension to extract ("tar.gz", "tar.xz")
 #   checksum_suffix - checksum asset suffix used for verification
-#   asset_match    - optional callable(asset, version) -> bool to pick the
+#   asset_match    - callable(asset, version) -> bool to pick the
 #                    download/checksum asset for a specific version
-#                    (default: name ends with release_format / checksum_suffix)
 #   list_versions  - optional callable(api_url) -> list[str] overriding the
 #                    generic "release tag == version" listing
 #   version_to_tag - optional callable(version) -> tag for the release lookup
+#   install_dir_name - optional fixed folder name the tool installs into
+#                    (Luxtorpeda/Boxtron style); folder = tag otherwise
+def _any_asset_match(asset: dict, version: str) -> bool:
+    """Accept any asset that has a download URL."""
+    return "browser_download_url" in asset
+
+
+def _no_aarch64_asset_match(asset: dict, version: str) -> bool:
+    """GE-style repos: accept any non-aarch64 asset."""
+    return "browser_download_url" in asset and "aarch64" not in asset["browser_download_url"]
+
+
 REPOS = [
     {
         "id": "ge-proton",
@@ -136,8 +148,7 @@ REPOS = [
         "api_url": "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases",
         "release_format": "tar.gz",
         "checksum_suffix": ".sha512sum",
-        "asset_match": lambda asset, version: "browser_download_url" in asset
-        and "aarch64" not in asset["browser_download_url"],
+        "asset_match": _no_aarch64_asset_match,
         "list_versions": None,
         "version_to_tag": None,
     },
@@ -150,6 +161,49 @@ REPOS = [
         "asset_match": _cachyos_asset_match,
         "list_versions": _cachyos_list_versions,
         "version_to_tag": _cachyos_version_to_tag,
+    },
+    {
+        "id": "proton-em",
+        "name": "Proton-EM",
+        "api_url": "https://api.github.com/repos/Etaash-mathamsetty/Proton/releases",
+        "release_format": "tar.xz",
+        "checksum_suffix": ".sha512sum",
+        "asset_match": _no_aarch64_asset_match,
+        "list_versions": None,
+        "version_to_tag": None,
+    },
+    {
+        "id": "rtsp-proton",
+        "name": "RTSP Proton",
+        "api_url": "https://api.github.com/repos/SpookySkeletons/proton-ge-rtsp/releases",
+        "release_format": "tar.gz",
+        "checksum_suffix": ".sha512sum",
+        "asset_match": _no_aarch64_asset_match,
+        "list_versions": None,
+        "version_to_tag": None,
+    },
+    {
+        "id": "luxtorpeda",
+        "name": "Luxtorpeda",
+        "api_url": "https://codeberg.org/api/v1/repos/luxtorpeda/luxtorpeda/releases",
+        "api_type": "codeberg",
+        "release_format": "tar.xz",
+        "checksum_suffix": ".sha512",
+        "asset_match": _any_asset_match,
+        "list_versions": None,
+        "version_to_tag": None,
+        "install_dir_name": "luxtorpeda",
+    },
+    {
+        "id": "boxtron",
+        "name": "Boxtron",
+        "api_url": "https://api.github.com/repos/dreamer/boxtron/releases",
+        "release_format": "tar.xz",
+        "checksum_suffix": ".sha512sum",
+        "asset_match": _any_asset_match,
+        "list_versions": None,
+        "version_to_tag": None,
+        "install_dir_name": "boxtron",
     },
 ]
 
@@ -226,11 +280,12 @@ def list_installed(install_dir: str) -> list:
 # Repo release fetching / install / remove (phase 3)
 # ---------------------------------------------------------------------------
 
-def _github_get_json(url: str):
-    """GET a GitHub API URL and return the parsed JSON (stdlib urllib only).
+def _api_get_json(url: str):
+    """GET an API URL (GitHub or Codeberg) and return the parsed JSON.
 
     Raises RuntimeError on HTTP/network errors and on GitHub API rate limiting
-    (mirrors ProtonUp-Qt's ghapi_rlcheck behaviour).
+    (mirrors ProtonUp-Qt's ghapi_rlcheck behaviour). urllib follows the HTTP
+    redirects GitHub returns for renamed repositories.
     """
     req = urllib.request.Request(
         url,
@@ -260,7 +315,7 @@ def _get_repo(repo_id: str) -> dict:
 
 
 def get_available_versions(repo_id: str) -> list:
-    """Return available versions for a repository (GitHub API, stdlib only).
+    """Return available versions for a repository (GitHub/Codeberg API, stdlib only).
 
     Synchronous by design: main.py runs it via asyncio's run_in_executor so the
     event loop is never blocked. Mirrors ProtonUp-Qt fetch_project_releases.
@@ -268,8 +323,10 @@ def get_available_versions(repo_id: str) -> list:
     repo = _get_repo(repo_id)
     if repo["list_versions"]:
         return repo["list_versions"](repo["api_url"])
-    # Generic GitHub path: version == release tag (GE-Proton).
-    releases = _github_get_json(f"{repo['api_url']}?per_page=100&page=1")
+    # Generic path: version == release tag (GE-Proton, Proton-EM, Boxtron, ...).
+    # GitHub paginates with per_page, Codeberg with limit.
+    param = "limit" if repo.get("api_type") == "codeberg" else "per_page"
+    releases = _api_get_json(f"{repo['api_url']}?{param}=100&page=1")
     return [
         r["tag_name"]
         for r in releases
@@ -292,14 +349,15 @@ def _fetch_release_data(repo: dict, version: str) -> dict:
     and passes the repo's asset_match.
     """
     tag = repo["version_to_tag"](version) if repo["version_to_tag"] else version
-    release = _github_get_json(f"{repo['api_url']}/tags/{tag}")
+    release = _api_get_json(f"{repo['api_url']}/tags/{tag}")
+    asset_match = repo.get("asset_match") or _any_asset_match
     values = {
         "version": release.get("tag_name", tag),
         "date": (release.get("published_at") or "")[:10],
     }
     for asset in release.get("assets", []):
         name = asset.get("name", "")
-        if not repo["asset_match"](asset, version):
+        if not asset_match(asset, version):
             continue
         if name.endswith(repo["release_format"]) and "download" not in values:
             values["download"] = asset["browser_download_url"]
@@ -366,7 +424,8 @@ def install_version(repo_id: str, version: str, progress=None) -> bool:
     repo = _get_repo(repo_id)
     install_dir = get_compatibilitytools_dir()
     tag = repo["version_to_tag"](version) if repo["version_to_tag"] else version
-    target = os.path.join(install_dir, tag)
+    # Luxtorpeda/Boxtron install into a fixed folder; Proton builds use the tag.
+    target = os.path.join(install_dir, repo.get("install_dir_name") or tag)
     if os.path.isdir(target):
         report(0, "Already installed")
         return False
@@ -412,6 +471,13 @@ def install_version(repo_id: str, version: str, progress=None) -> bool:
         if "checksum" in data and os.path.exists(checksum_file):
             with open(checksum_file, "w") as f:
                 f.write(local_checksum)
+
+        # Fixed-folder tools (Luxtorpeda/Boxtron) don't carry a version in the
+        # folder name; record it in VERSION.txt (mirrors ProtonUp-Qt
+        # write_tool_version) so the Installed list can show it.
+        if repo.get("install_dir_name"):
+            with open(os.path.join(target, "VERSION.txt"), "w") as f:
+                f.write(f"{version}\n")
 
         report(100, "Installed")
         return True
