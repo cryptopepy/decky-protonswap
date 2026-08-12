@@ -1,99 +1,124 @@
-# Decky Plugin Template [![Chat](https://img.shields.io/badge/chat-on%20discord-7289da.svg)](https://deckbrew.xyz/discord)
+# ProtonSwap — Decky Loader plugin
 
-Reference example for using [decky-frontend-lib](https://github.com/SteamDeckHomebrew/decky-frontend-lib) (@decky/ui) in a [decky-loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin.
+A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the
+Steam Deck that manages **alternative Proton versions**. It lists the compatibility
+tools currently installed in Steam, lets you pick a repository (GE-Proton,
+Proton-CachyOS), browse the available versions, download and install one, and remove
+installed builds again — all from the Decky quick-access menu.
 
-### **Please also refer to the [wiki](https://wiki.deckbrew.xyz/en/user-guide/home#plugin-development) for important information on plugin development and submissions/updates. currently documentation is split between this README and the wiki which is something we are hoping to rectify in the future.**  
+[![Chat](https://img.shields.io/badge/chat-on%20discord-7289da.svg)](https://deckbrew.xyz/discord)
 
-## Developers
+## What it does
 
-### Dependencies
+- **List installed Proton versions** — scans Steam's `compatibilitytools.d/`
+  directory and shows each installed build (folder name + the version from its
+  `VERSION.txt`).
+- **Install alternative versions** — choose a repository, load its available
+  releases from GitHub, and install any version with one click. Downloads are
+  streamed with a progress bar, verified against the release's SHA-512 checksum,
+  and extracted safely into `compatibilitytools.d/`.
+- **Remove installed versions** — delete a build from the Decky UI (behind a
+  confirmation dialog).
 
-This template relies on the user having Node.js v16.14+ and `pnpm` (v9) installed on their system.  
-Please make sure to install pnpm v9 to prevent issues with CI during plugin submission.  
-`pnpm` can be downloaded from `npm` itself which is recommended.
+Installed tools show up in Steam's game properties like any other compatibility
+tool (Properties → Compatibility → Force the use of a specific Steam Play
+compatibility tool).
 
-#### Linux
+### Supported repositories
+
+The plugin contacts these GitHub APIs (no API key required; public rate limits
+apply):
+
+| Repo | Releases API | Format | Notes |
+|------|--------------|--------|-------|
+| **GE-Proton** (`GloriousEggroll/proton-ge-custom`) | `https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases` | `tar.gz` + `.sha512sum` | Official releases; version = release tag, e.g. `GE-Proton9-7` |
+| **Proton-CachyOS** (`CachyOS/proton-cachyos`) | `https://api.github.com/repos/CachyOS/proton-cachyos/releases` | `tar.xz` + `.sha512sum` | CPU-optimized builds; only the architecture your CPU supports is offered (Steam Deck APU ⇒ `x86_64_v3`), e.g. `cachyos-11.0-20260703-slr@x86_64_v3` |
+
+More repositories can be added by extending the `REPOS` registry in
+`protonswap.py` (URL, archive format, checksum suffix, asset/version parsing).
+
+## How it works
+
+- `src/index.tsx` — React UI (installed list, repo/version picker, progress bar,
+  toasts) using `@decky/ui` components, sized for the ~400px Decky panel.
+- `main.py` — the Decky Python backend: exposes `get_repos`, `get_installed`,
+  `get_available_versions`, `install_version`, `remove_version` as async
+  callables; streams progress to the UI via `decky.emit("protonswap_progress", …)`.
+- `protonswap.py` — pure-stdlib logic (no pip dependencies, runs in Decky's
+  minimal Python): Steam-root detection, `compatibilitytools.d` handling,
+  GitHub release fetching, checksum verification, safe tar extraction, removal.
+
+## Requirements
+
+- Steam Deck with [Decky Loader](https://wiki.deckbrew.xyz/en/user-guide/home) installed.
+- Network access to GitHub (api.github.com).
+- The plugin's backend runs with root privileges (`_root` flag in `plugin.json`).
+
+## Installation
+
+### From a zip (manual)
+
+1. `pnpm i` and `pnpm run build` (or use a release artifact).
+2. Package the plugin into a zip with these files at the archive root:
+   `dist/index.js`, `main.py`, `protonswap.py`, `package.json`, `plugin.json`,
+   `README.md`, `LICENSE`.
+3. On the Deck: Decky Loader → Settings → **Install from file/URL** and select
+   the zip.
+
+### Developer install (decky CLI)
 
 ```bash
-sudo npm i -g pnpm@9
+pnpm i                 # install frontend deps
+pnpm run build         # build dist/index.js
+./.vscode/build.sh     # builds the plugin zip via the decky CLI (needs Docker)
 ```
 
-If you would like to build plugins that have their own custom backends, Docker is required as it is used by the Decky CLI tool.
+The CLI lands in `cli/` after running `./.vscode/setup.sh`. Alternatively copy
+the plugin folder (`dist/`, `main.py`, `protonswap.py`, `package.json`,
+`plugin.json`) to `~/homebrew/plugins/ProtonSwap/` on the Deck and restart
+Decky.
 
-### Making your own plugin
-
-1. You can fork this repo or utilize the "Use this template" button on Github.
-2. In your local fork/own plugin-repository run these commands:
-   1. ``pnpm i``
-   2. ``pnpm run build``
-   - These setup pnpm and build the frontend code for testing.
-3. Consult the [decky-frontend-lib](https://github.com/SteamDeckHomebrew/decky-frontend-lib) repository for ways to accomplish your tasks.
-   - Documentation and examples are still rough, 
-   - Decky loader primarily targets Steam Deck hardware so keep this in mind when developing your plugin.
-4. If using VSCodium/VSCode, run the `setup` and `build` and `deploy` tasks. If not using VSCodium etc. you can derive your own makefile or just manually utilize the scripts for these commands as you see fit.
-
-If you use VSCode or it's derivatives (we suggest [VSCodium](https://vscodium.com/)!) just run the `setup` and `build` tasks. It's really that simple.
-
-#### Other important information
-
-Everytime you change the frontend code (`index.tsx` etc) you will need to rebuild using the commands from step 2 above or the build task if you're using vscode or a derivative.
-
-Note: If you are receiving build errors due to an out of date library, you should run this command inside of your repository:
+## Development & testing
 
 ```bash
-pnpm update @decky/ui --latest
+pnpm run build     # type-check + bundle the frontend (strict TS) -> dist/
+pnpm run watch     # rebuild on change
 ```
 
-### Backend support
+There is no automated test suite (`pnpm test` intentionally fails); the backend
+is a standalone stdlib module you can exercise without a Deck:
 
-If you are developing with a backend for a plugin and would like to submit it to the [decky-plugin-database](https://github.com/SteamDeckHomebrew/decky-plugin-database) you will need to have all backend code located in ``backend/src``, with backend being located in the root of your git repository.
-When building your plugin, the source code will be built and any finished binary or binaries will be output to ``backend/out`` (which is created during CI.)
-If your buildscript, makefile or any other build method does not place the binary files in the ``backend/out`` directory they will not be properly picked up during CI and your plugin will not have the required binaries included for distribution.
-
-Example:  
-In our makefile used to demonstrate the CI process of building and distributing a plugin backend, note that the makefile explicitly creates the `out` folder (``backend/out``) and then compiles the binary into that folder. Here's the relevant snippet.
-
-```make
-hello:
-	mkdir -p ./out
-	gcc -o ./out/hello ./src/main.c
+```bash
+python3 -m py_compile main.py protonswap.py
+python3 -c 'import protonswap as p; print(p.get_compatibilitytools_dir()); print(p.get_available_versions("ge-proton")[:3])'
 ```
 
-The CI does create the `out` folder itself but we recommend creating it yourself if possible during your build process to ensure the build process goes smoothly.
+The second command hits the real GitHub API (release listing only — no large
+downloads). A full install/remove roundtrip can be simulated against a temp
+directory with a small synthetic tarball; see the smoke tests used during
+development.
 
-Note: When locally building your plugin it will be placed into a folder called 'out' this is different from the concept described above.
+### On-Deck checklist
 
-The out folder is not sent to the final plugin, but is then put into a ``bin`` folder which is found at the root of the plugin's directory.  
-More information on the bin folder can be found below in the distribution section below.
+Install the plugin, then verify:
 
-### Distribution
+1. The Installed list shows real compatibility tools (with `VERSION.txt` versions).
+2. Installing a real GE-Proton build (~500 MB) shows progress and a success toast.
+3. Installing a Proton-CachyOS build offers the `x86_64_v3` variant.
+4. After restarting Steam, the new tool appears in game Properties → Compatibility.
+5. Removing a tool deletes its folder and Steam no longer lists it.
+6. Network errors surface as toasts (e.g. disable Wi-Fi, then refresh versions).
+7. The panel fits comfortably at 1280×800.
 
-We recommend following the instructions found in the [decky-plugin-database](https://github.com/SteamDeckHomebrew/decky-plugin-database) on how to get your plugin up on the plugin store. This is the best way to get your plugin in front of users.
-You can also choose to do distribution via a zip file containing the needed files, if that zip file is uploaded to a URL it can then be downloaded and installed via decky-loader.
+## License
 
-Layout of a plugin zip ready for distribution:
-```
-pluginname-v1.0.0.zip (version number is optional but recommended for users sake)
-   |
-   pluginname/ <directory>
-   |  |  |
-   |  |  bin/ <directory> (optional)
-   |  |     |
-   |  |     binary (optional)
-   |  |
-   |  dist/ <directory> [required]
-   |      |
-   |      index.js [required]
-   | 
-   package.json [required]
-   plugin.json [required]
-   main.py {required if you are using the python backend of decky-loader: serverAPI}
-   README.md (optional but recommended)
-   LICENSE(.md) [required, filename should be roughly similar, suffix not needed]
-```
+BSD-3-Clause, `Copyright (c) 2026, decky-protonswap contributors` (see
+`LICENSE`, which also retains the original decky-plugin-template license at the
+bottom as required for plugin-store submission). The plugin borrows patterns
+from [ProtonUp-Qt](https://github.com/DavidoTek/ProtonUp-Qt) (GPLv3); any code
+copied from it must remain GPL-compatible.
 
-Note regarding licenses: Including a license is required for the plugin store if your chosen license requires the license to be included alongside usage of source-code/binaries!
+## Disclaimer
 
-Standard procedure for licenses is to have your chosen license at the top of the file, and to leave the original license for the plugin-template at the bottom. If this is not the case on submission to the plugin database, you will be asked to fix this discrepancy.
-
-We cannot and will not distribute your plugin on the Plugin Store if it's license requires it's inclusion but you have not included a license to be re-distributed with your plugin in the root of your git repository.
+ProtonSwap is an independent tool and is not affiliated with Valve, GloriousEggroll
+(GE-Proton), CachyOS, or the ProtonUp-Qt project.
