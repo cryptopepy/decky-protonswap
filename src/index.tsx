@@ -1,115 +1,303 @@
 import {
   ButtonItem,
+  Dropdown,
+  ModalRoot,
   PanelSection,
   PanelSectionRow,
-  Navigation,
-  staticClasses
+  Spinner,
+  showModal,
+  staticClasses,
 } from "@decky/ui";
 import {
   addEventListener,
-  removeEventListener,
   callable,
   definePlugin,
+  removeEventListener,
   toaster,
-  // routerHook
-} from "@decky/api"
-import { useState } from "react";
-import { FaShip } from "react-icons/fa";
+} from "@decky/api";
+import { useCallback, useEffect, useState } from "react";
+import { FaDownload } from "react-icons/fa";
 
-// import logo from "../assets/logo.png";
+interface InstalledTool {
+  folder: string;
+  version: string | null;
+}
 
-// This function calls the python function "add", which takes in two numbers and returns their sum (as a number)
-// Note the type annotations:
-//  the first one: [first: number, second: number] is for the arguments
-//  the second one: number is for the return value
-const add = callable<[first: number, second: number], number>("add");
+interface Repo {
+  id: string;
+  name: string;
+}
 
-// This function calls the python function "start_timer", which takes in no arguments and returns nothing.
-// It starts a (python) timer which eventually emits the event 'timer_event'
-const startTimer = callable<[], void>("start_timer");
+const getRepos = callable<[], Repo[]>("get_repos");
+const getInstalled = callable<[], InstalledTool[]>("get_installed");
+const getAvailableVersions = callable<[repoId: string], string[]>(
+  "get_available_versions"
+);
+const installVersion = callable<[repoId: string, version: string], boolean>(
+  "install_version"
+);
+const removeVersion = callable<[folder: string], boolean>("remove_version");
+
+// CachyOS versions are encoded as "<tag>@<arch>" — render them friendlier.
+function formatVersion(version: string): string {
+  return version.replace("@", " · ");
+}
 
 function Content() {
-  const [result, setResult] = useState<number | undefined>();
+  const [installed, setInstalled] = useState<InstalledTool[] | null>(null);
+  const [repos, setRepos] = useState<Repo[]>([]);
+  const [repoId, setRepoId] = useState<string | undefined>();
+  const [versions, setVersions] = useState<string[] | null>(null);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ pct: number; msg: string } | null>(
+    null
+  );
 
-  const onClick = async () => {
-    const result = await add(Math.random(), Math.random());
-    setResult(result);
+  const refreshInstalled = useCallback(async () => {
+    try {
+      setInstalled(await getInstalled());
+    } catch (e) {
+      toaster.toast({ title: "Error", body: `Failed to load installed: ${e}` });
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setRepos(await getRepos());
+      } catch (e) {
+        toaster.toast({ title: "Error", body: `Failed to load repositories: ${e}` });
+      }
+      refreshInstalled();
+    })();
+    const listener = addEventListener<[string, string, number, string]>(
+      "protonswap_progress",
+      (_repoId, _version, pct, msg) => {
+        setProgress({ pct, msg });
+      }
+    );
+    return () => removeEventListener("protonswap_progress", listener);
+  }, [refreshInstalled]);
+
+  const loadVersions = useCallback(async (id: string) => {
+    setRepoId(id);
+    setLoadingVersions(true);
+    setVersions(null);
+    try {
+      setVersions(await getAvailableVersions(id));
+    } catch (e) {
+      toaster.toast({ title: "Error", body: `Failed to load versions: ${e}` });
+      setVersions([]);
+    } finally {
+      setLoadingVersions(false);
+    }
+  }, []);
+
+  const doInstall = async (version: string) => {
+    if (!repoId || busy) return;
+    setBusy(`Installing ${version}`);
+    setProgress({ pct: 0, msg: "Starting" });
+    try {
+      const ok = await installVersion(repoId, version);
+      toaster.toast({
+        title: ok ? "Installed" : "Install failed",
+        body: formatVersion(version),
+      });
+      await refreshInstalled();
+    } catch (e) {
+      toaster.toast({ title: "Install error", body: String(e) });
+    } finally {
+      setBusy(null);
+      setProgress(null);
+    }
+  };
+
+  const confirmRemove = (tool: InstalledTool) => {
+    showModal(
+      <ModalRoot
+        onOK={async () => {
+          setBusy(`Removing ${tool.folder}`);
+          try {
+            const ok = await removeVersion(tool.folder);
+            toaster.toast({
+              title: ok ? "Removed" : "Remove failed",
+              body: tool.folder,
+            });
+            await refreshInstalled();
+          } catch (e) {
+            toaster.toast({ title: "Remove error", body: String(e) });
+          } finally {
+            setBusy(null);
+          }
+        }}
+      >
+        Remove {tool.folder}
+        {tool.version ? ` (${tool.version})` : ""}?
+      </ModalRoot>
+    );
   };
 
   return (
-    <PanelSection title="Panel Section">
-      <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={onClick}
-        >
-          {result ?? "Add two numbers via Python"}
-        </ButtonItem>
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={() => startTimer()}
-        >
-          {"Start Python timer"}
-        </ButtonItem>
-      </PanelSectionRow>
+    <>
+      <PanelSection title="Installed Proton">
+        {installed === null ? (
+          <PanelSectionRow>
+            <Spinner />
+          </PanelSectionRow>
+        ) : installed.length === 0 ? (
+          <PanelSectionRow>
+            <span style={{ opacity: 0.6 }}>
+              No compatibility tools installed.
+            </span>
+          </PanelSectionRow>
+        ) : (
+          installed.map((tool) => (
+            <PanelSectionRow key={tool.folder}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "8px",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {tool.folder}
+                  </div>
+                  {tool.version && (
+                    <div style={{ opacity: 0.6, fontSize: "0.9em" }}>
+                      {tool.version}
+                    </div>
+                  )}
+                </div>
+                <ButtonItem
+                  layout="below"
+                  disabled={!!busy}
+                  onClick={() => confirmRemove(tool)}
+                >
+                  Remove
+                </ButtonItem>
+              </div>
+            </PanelSectionRow>
+          ))
+        )}
+      </PanelSection>
 
-      {/* <PanelSectionRow>
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <img src={logo} />
-        </div>
-      </PanelSectionRow> */}
-
-      {/*<PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={() => {
-            Navigation.Navigate("/decky-plugin-test");
-            Navigation.CloseSideMenus();
-          }}
-        >
-          Router
-        </ButtonItem>
-      </PanelSectionRow>*/}
-    </PanelSection>
+      <PanelSection title="Install">
+        <PanelSectionRow>
+          <Dropdown
+            rgOptions={repos.map((r) => ({ data: r.id, label: r.name }))}
+            selectedOption={repoId}
+            onChange={(opt) => loadVersions(opt.data)}
+            strDefaultLabel="Select repository"
+            menuLabel="Repository"
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            disabled={!repoId || loadingVersions || !!busy}
+            onClick={() => loadVersions(repoId!)}
+          >
+            Refresh versions
+          </ButtonItem>
+        </PanelSectionRow>
+        {loadingVersions ? (
+          <PanelSectionRow>
+            <Spinner />
+          </PanelSectionRow>
+        ) : versions !== null && versions.length === 0 ? (
+          <PanelSectionRow>
+            <span style={{ opacity: 0.6 }}>No versions available.</span>
+          </PanelSectionRow>
+        ) : (
+          versions?.map((version) => (
+            <PanelSectionRow key={version}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "8px",
+                }}
+              >
+                <span
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {formatVersion(version)}
+                </span>
+                <ButtonItem
+                  layout="below"
+                  disabled={!!busy}
+                  onClick={() => doInstall(version)}
+                >
+                  Install
+                </ButtonItem>
+              </div>
+            </PanelSectionRow>
+          ))
+        )}
+        {progress && (
+          <PanelSectionRow>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+                padding: "8px 0",
+              }}
+            >
+              <span style={{ fontSize: "0.9em", opacity: 0.8 }}>
+                {progress.msg} ({progress.pct}%)
+              </span>
+              <div
+                style={{
+                  height: "6px",
+                  background: "rgba(255,255,255,0.1)",
+                  borderRadius: "3px",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${progress.pct}%`,
+                    background: "#7baaf7",
+                    transition: "width 0.2s",
+                  }}
+                />
+              </div>
+            </div>
+          </PanelSectionRow>
+        )}
+        {busy && (
+          <PanelSectionRow>
+            <Spinner />
+          </PanelSectionRow>
+        )}
+      </PanelSection>
+    </>
   );
-};
+}
 
 export default definePlugin(() => {
-  console.log("Template plugin initializing, this is called once on frontend startup")
-
-  // serverApi.routerHook.addRoute("/decky-plugin-test", DeckyPluginRouterTest, {
-  //   exact: true,
-  // });
-
-  // Add an event listener to the "timer_event" event from the backend
-  const listener = addEventListener<[
-    test1: string,
-    test2: boolean,
-    test3: number
-  ]>("timer_event", (test1, test2, test3) => {
-    console.log("Template got timer_event with:", test1, test2, test3)
-    toaster.toast({
-      title: "template got timer_event",
-      body: `${test1}, ${test2}, ${test3}`
-    });
-  });
-
   return {
-    // The name shown in various decky menus
-    name: "Test Plugin",
-    // The element displayed at the top of your plugin's menu
-    titleView: <div className={staticClasses.Title}>Decky Example Plugin</div>,
-    // The content of your plugin's menu
+    name: "ProtonSwap",
+    titleView: <div className={staticClasses.Title}>ProtonSwap</div>,
     content: <Content />,
-    // The icon displayed in the plugin list
-    icon: <FaShip />,
-    // The function triggered when your plugin unloads
-    onDismount() {
-      console.log("Unloading")
-      removeEventListener("timer_event", listener);
-      // serverApi.routerHook.removeRoute("/decky-plugin-test");
-    },
+    icon: <FaDownload />,
+    onDismount() {},
   };
 });

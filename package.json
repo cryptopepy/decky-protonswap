@@ -1,7 +1,7 @@
 {
-  "name": "decky-plugin-template",
+  "name": "decky-protonswap",
   "version": "0.0.1",
-  "description": "A template to quickly create decky plugins from scratch, based on TypeScript and webpack",
+  "description": "Decky Loader plugin to install and manage alternative Proton versions (GE-Proton, Proton-CachyOS).",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
@@ -19,7 +19,7 @@
     "steam-deck",
     "deck"
   ],
-  "author": "You <you@you.tld>",
+  "author": "decky-protonswap",
   "license": "BSD-3-Clause",
   "bugs": {
     "url": "https://github.com/SteamDeckHomebrew/decky-plugin-template/issues"
