@@ -55,3 +55,9 @@ out/*
 cli/
 cli/*
 cli/decky
+
+#more
+.reasonix/
+AGENTS.md
+ProtonUp-Qt/
+.DS_Store
