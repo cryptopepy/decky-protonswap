@@ -26,17 +26,17 @@ compatibility tool).
 
 ### Supported repositories
 
-The plugin contacts these GitHub APIs (no API key required; public rate limits
-apply):
+The plugin fetches release metadata from each project's public API (GitHub, or
+Codeberg for Luxtorpeda) — no API key required, public rate limits apply:
 
-| Repo | Releases API | Format | Notes |
-|------|--------------|--------|-------|
-| **GE-Proton** (`GloriousEggroll/proton-ge-custom`) | `https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases` | `tar.gz` + `.sha512sum` | Official releases; version = release tag, e.g. `GE-Proton9-7` |
-| **Proton-CachyOS** (`CachyOS/proton-cachyos`) | `https://api.github.com/repos/CachyOS/proton-cachyos/releases` | `tar.xz` + `.sha512sum` | CPU-optimized builds; only the architecture your CPU supports is offered (Steam Deck APU ⇒ `x86_64_v3`), e.g. `cachyos-11.0-20260703-slr@x86_64_v3` |
-| **Proton-EM** (`Etaash-mathamsetty/Proton`) | `https://api.github.com/repos/Etaash-mathamsetty/Proton/releases` | `tar.xz` | Valve Proton fork with Wine-Wayland + FSR4 patches |
-| **RTSP Proton** (`SpookySkeletons/proton-ge-rtsp`) | `https://api.github.com/repos/SpookySkeletons/proton-ge-rtsp/releases` | `tar.gz` + `.sha512sum` | GE-Proton fork with enhanced Windows Media Foundation support (repo has moved; redirects are followed) |
-| **Luxtorpeda** (`luxtorpeda/luxtorpeda`) | `https://codeberg.org/api/v1/repos/luxtorpeda/luxtorpeda/releases` | `tar.xz` + `.sha512` | Runs native Linux engine ports for classic games; hosted on Codeberg |
-| **Boxtron** (`dreamer/boxtron`) | `https://api.github.com/repos/dreamer/boxtron/releases` | `tar.xz` | Steam Play tool to run DOS games via native Linux DOSBox (needs `dosbox`, `inotifywait`, `timidity` installed) |
+| Repo | Host | Format | Notes |
+|------|------|--------|-------|
+| **GE-Proton** (`GloriousEggroll/proton-ge-custom`) | GitHub | tar.gz | Official releases, e.g. `GE-Proton9-7` |
+| **Proton-CachyOS** (`CachyOS/proton-cachyos`) | GitHub | tar.xz | CPU-optimized; only your arch is offered (Deck ⇒ `x86_64_v3`) |
+| **Proton-EM** (`Etaash-mathamsetty/Proton`) | GitHub | tar.xz | Proton fork with Wine-Wayland + FSR4 patches |
+| **RTSP Proton** (`SpookySkeletons/proton-ge-rtsp`) | GitHub | tar.gz | GE fork with enhanced Media Foundation (repo moved; redirects followed) |
+| **Luxtorpeda** (`luxtorpeda/luxtorpeda`) | Codeberg | tar.xz | Runs native engine ports for classic games |
+| **Boxtron** (`dreamer/boxtron`) | GitHub | tar.xz | DOS games via native DOSBox (needs `dosbox`, `inotifywait`, `timidity`) |
 
 More repositories can be added by extending the `REPOS` registry in
 `protonswap.py` (URL, archive format, checksum suffix, asset/version parsing,
