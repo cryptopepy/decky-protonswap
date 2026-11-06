@@ -87,6 +87,19 @@ Plugin-specific log files land under `~/homebrew/logs/ProtonSwap/` on the Deck.
 9. Turn Wi-Fi off and refresh versions: an error toast appears instead of a hang.
 10. The panel fits at 1280×800 without horizontal scrolling.
 
+## Deck-specific gotchas
+
+- The plugin declares the `root` flag, so decky-loader runs the backend as root
+  and sets `HOME` to **root's** home. ProtonSwap therefore resolves the Steam
+  directory from `DECKY_USER_HOME` (the deck user's real home) and only falls
+  back to `~` when that variable is absent.
+- After a successful install the extracted files are chowned to match the owner
+  of `compatibilitytools.d/`, so they don't end up root-owned and unmanageable by
+  ProtonUp-Qt or the desktop Steam client.
+- `py_modules/protonswap.py` must stay in `py_modules/`: decky-loader appends
+  `<plugin_dir>/py_modules` to `sys.path`, and the decky CLI only packages that
+  directory (plus `dist/`, `bin/`, `defaults/` and the fixed root files).
+
 ## Troubleshooting
 
 | Symptom | Check |
@@ -95,5 +108,7 @@ Plugin-specific log files land under `~/homebrew/logs/ProtonSwap/` on the Deck.
 | Panel blank / no sections | `dist/index.js` was not copied — rerun `pnpm run build` and redeploy |
 | "Failed to load installed" toast | `compatibilitytools.d/` missing or unreadable by the deck user |
 | `ModuleNotFoundError: protonswap` | `py_modules/protonswap.py` was not deployed |
+| Installed list is empty | Steam never launched, or the Steam root differs — check `DECKY_USER_HOME` |
 | Install fails immediately | Network/GitHub rate limit — check the toast text, retry later |
 | New tool not in Steam | Restart Steam (compatibility tools are scanned at startup) |
+| Tool files owned by root | `ls -l ~/.steam/root/compatibilitytools.d`; this build chowns after extract, so reinstall |

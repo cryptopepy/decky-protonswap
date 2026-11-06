@@ -20,10 +20,15 @@ import urllib.request
 # Constants
 # ---------------------------------------------------------------------------
 
+# The plugin may run with the root flag, in which case decky-loader sets HOME to
+# root's home directory. DECKY_USER_HOME always points at the Deck user's home,
+# which is where Steam (and compatibilitytools.d) actually lives.
+_HOME_DIR = os.environ.get("DECKY_USER_HOME") or os.path.expanduser("~")
+
 # Steam install locations, mirroring ProtonUp-Qt pupgui2/constants.py
 # `_POSSIBLE_STEAM_ROOTS`. The first existing one wins.
 _STEAM_ROOT_CANDIDATES = [
-    os.path.realpath(os.path.join(os.path.expanduser("~"), root))
+    os.path.realpath(os.path.join(_HOME_DIR, root))
     for root in [
         ".local/share/Steam",
         ".steam/root",
@@ -411,6 +416,27 @@ def _extract_tar(tar_path: str, extract_path: str, mode: str = "r:") -> bool:
         return False
 
 
+def _chown_like(path: str, reference: str) -> None:
+    """Give `path`'s tree the same owner as `reference` (no-op when not root).
+
+    The plugin can run with the root flag, so extracted tools would otherwise be
+    owned by root inside the Deck user's compatibilitytools.d — which breaks
+    later user-level management (e.g. ProtonUp-Qt, Steam cleanup).
+    """
+    if os.geteuid() != 0:
+        return
+    try:
+        st = os.stat(reference)
+    except OSError:
+        return
+    for root, _dirs, files in os.walk(path):
+        for entry in (root, *(os.path.join(root, name) for name in files)):
+            try:
+                os.chown(entry, st.st_uid, st.st_gid, follow_symlinks=False)
+            except OSError:
+                pass
+
+
 def install_version(repo_id: str, version: str, progress=None) -> bool:
     """Download, verify and install a Proton version into compatibilitytools.d.
 
@@ -478,6 +504,10 @@ def install_version(repo_id: str, version: str, progress=None) -> bool:
         if repo.get("install_dir_name"):
             with open(os.path.join(target, "VERSION.txt"), "w") as f:
                 f.write(f"{version}\n")
+
+        # When running as root, hand ownership back to whoever owns the compat
+        # folder so Steam/the user can still manage the files.
+        _chown_like(target, install_dir)
 
         report(100, "Installed")
         return True
