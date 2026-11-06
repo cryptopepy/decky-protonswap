@@ -39,9 +39,9 @@ Codeberg for Luxtorpeda) — no API key required, public rate limits apply:
 | **Boxtron** (`dreamer/boxtron`) | GitHub | tar.xz | DOS games via native DOSBox (needs `dosbox`, `inotifywait`, `timidity`) |
 
 More repositories can be added by extending the `REPOS` registry in
-`protonswap.py` (URL, archive format, checksum suffix, asset/version parsing,
-plus `api_type: "codeberg"` for Codeberg hosts and `install_dir_name` for tools
-that install into a fixed folder like Luxtorpeda/Boxtron).
+`py_modules/protonswap.py` (URL, archive format, checksum suffix, asset/version
+parsing, plus `api_type: "codeberg"` for Codeberg hosts and `install_dir_name`
+for tools that install into a fixed folder like Luxtorpeda/Boxtron).
 
 ## How it works
 
@@ -50,10 +50,12 @@ that install into a fixed folder like Luxtorpeda/Boxtron).
 - `main.py` — the Decky Python backend: exposes `get_repos`, `get_installed`,
   `get_available_versions`, `install_version`, `remove_version` as async
   callables; streams progress to the UI via `decky.emit("protonswap_progress", …)`.
-- `protonswap.py` — pure-stdlib logic (no pip dependencies, runs in Decky's
-  minimal Python): Steam-root detection, `compatibilitytools.d` handling,
-  GitHub/Codeberg release fetching, checksum verification, safe tar extraction,
-  removal.
+- `py_modules/protonswap.py` — pure-stdlib logic (no pip dependencies, runs in
+  Decky's minimal Python): Steam-root detection, `compatibilitytools.d`
+  handling, GitHub/Codeberg release fetching, checksum verification, safe tar
+  extraction, removal. It lives in `py_modules/` because decky-loader appends
+  `<plugin_dir>/py_modules` to `sys.path` and the decky CLI only packages that
+  directory (a root-level module would not ship).
 
 ## Requirements
 
@@ -67,7 +69,7 @@ that install into a fixed folder like Luxtorpeda/Boxtron).
 
 1. `pnpm i` and `pnpm run build` (or use a release artifact).
 2. Package the plugin into a zip with these files at the archive root:
-   `dist/index.js`, `main.py`, `protonswap.py`, `package.json`, `plugin.json`,
+   `dist/`, `main.py`, `py_modules/`, `package.json`, `plugin.json`,
    `README.md`, `LICENSE`.
 3. On the Deck: Decky Loader → Settings → **Install from file/URL** and select
    the zip.
@@ -81,9 +83,9 @@ pnpm run build         # build dist/index.js
 ```
 
 The CLI lands in `cli/` after running `./.vscode/setup.sh`. Alternatively copy
-the plugin folder (`dist/`, `main.py`, `protonswap.py`, `package.json`,
+the plugin folder (`dist/`, `main.py`, `py_modules/`, `package.json`,
 `plugin.json`) to `~/homebrew/plugins/ProtonSwap/` on the Deck and restart
-Decky.
+Decky (see [TESTING.md](TESTING.md)).
 
 ## Development & testing
 
@@ -96,8 +98,8 @@ There is no automated test suite (`pnpm test` intentionally fails); the backend
 is a standalone stdlib module you can exercise without a Deck:
 
 ```bash
-python3 -m py_compile main.py protonswap.py
-python3 -c 'import protonswap as p; print(p.get_compatibilitytools_dir()); print(p.get_available_versions("ge-proton")[:3])'
+python3 -m py_compile main.py py_modules/protonswap.py
+PYTHONPATH=py_modules python3 -c 'import protonswap as p; print(p.get_compatibilitytools_dir()); print(p.get_available_versions("ge-proton")[:3])'
 ```
 
 The second command hits the real GitHub API (release listing only — no large
